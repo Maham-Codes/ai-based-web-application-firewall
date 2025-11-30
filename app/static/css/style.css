@@ -1,0 +1,38 @@
+body.matrix-bg{
+background:black;
+color:#00ff9d;
+font-family:Consolas, monospace;
+}
+.glow{
+color:#00ff9d;
+text-shadow:0 0 10px #00ff9d;
+}
+.card{
+border:1px solid #00ff9d;
+padding:15px;
+margin:20px;
+background:rgba(0,255,157,0.05);
+}
+textarea{
+width:100%;
+height:80px;
+background:black;
+color:#0f0;
+border:1px solid #0f0;
+}
+button{
+background:#00ff9d;
+border:none;
+padding:10px;
+cursor:pointer;
+}
+.mode-btn {
+  background:#00ff9d;
+  border:1px solid #00ff9d;
+  padding:6px 14px;
+  margin-right:10px;
+  cursor:pointer;
+  color:black;
+  font-weight:bold;
+}
+
