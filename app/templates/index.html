@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<title>AI WAF Dashboard</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="matrix-bg">
+<div class="container">
+<h1 class="glow">AI WEB APPLICATION FIREWALL</h1>
+
+
+<section class="card">
+<h2>Analyze Request</h2>
+<form id="analyzeForm">
+<textarea id="inputText" placeholder="Enter payload..."></textarea>
+<button type="submit">Analyze</button>
+</form>
+<p id="resultText"></p>
+</section>
+
+
+<section class="card">
+  <h2>Live Attack Chart</h2>
+
+  <div style="margin-bottom: 10px;">
+      <button id="btnLast" class="mode-btn">Last Result</button>
+      <button id="btnHistory" class="mode-btn">History Chart</button>
+  </div>
+
+  <canvas id="attackChart"></canvas>
+</section>
+
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
