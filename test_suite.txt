@@ -1,0 +1,42 @@
+======================================
+SAFE TEST CASES (General — Expected SAFE)
+======================================
+
+1. hello how are you
+2. this is a normal safe request
+3. i am a student testing the firewall
+4. please open the homepage
+5. testing safe input nothing harmful
+
+
+======================================
+SAFE TEST CASES (CSIC Dataset Style — Expected SAFE)
+======================================
+
+6. /tienda1/publico/anadir.jsp?id=4&nombre=mesa&cantidad=1
+7. /tienda1/publico/entrar.jsp?error=Acceso+denegado
+8. /tienda1/publico/listar.jsp
+9. /tienda1/publico/producto.jsp?id=15
+10. /tienda1/private/usuario.jsp?id=23
+
+
+======================================
+MALICIOUS TEST CASES (General Attacks — Expected MALICIOUS)
+======================================
+
+11. SELECT * FROM users
+12. ' OR '1'='1 --
+13. <script>alert(1)</script>
+14. ../../etc/passwd
+15. ; rm -rf /
+
+
+======================================
+MALICIOUS TEST CASES (CSIC Attack Style — Expected MALICIOUS)
+======================================
+
+16. /tienda1/publico/anadir.jsp?id=1 OR '1'='1
+17. /tienda1/publico/anadir.jsp?nombre=<script>alert(1)</script>
+18. /tienda1/publico/anadir.jsp?file=../../etc/passwd
+19. /tienda1/publico/anadir.jsp?cantidad=1; rm -rf /
+20. /tienda1/publico/anadir.jsp?id=1; DROP TABLE users; --
